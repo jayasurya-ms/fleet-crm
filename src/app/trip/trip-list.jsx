@@ -15,9 +15,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import BASE_URL from "@/config/base-url";
 import useNumericInput from "@/hooks/use-numeric-input";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   flexRender,
   getCoreRowModel,
@@ -28,9 +38,10 @@ import {
 } from "@tanstack/react-table";
 import axios from "axios";
 import Cookies from "js-cookie";
-import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Eye, Search } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Eye, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import CreateTrip from "./create-trip";
 
 const TripList = () => {
@@ -40,6 +51,8 @@ const TripList = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [previousSearchTerm, setPreviousSearchTerm] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedTrip, setSelectedTrip] = useState(null);
 
   const [pagination, setPagination] = useState({
     pageIndex: 0,
@@ -56,6 +69,56 @@ const TripList = () => {
   const handleViewTrip = (id) => {
     storeCurrentPage();
     navigate(`/trip/view/${id}`);
+  };
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async ({ trip_push_date, trip_sl_no }) => {
+      const token = Cookies.get("token");
+      const formData = new FormData();
+      formData.append("trip_push_date", trip_push_date);
+      formData.append("trip_sl_no", trip_sl_no);
+
+      const response = await axios.post(
+        `${BASE_URL}/api/tripAlldelete`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || "Trip deleted successfully");
+      // Invalidate and refetch trips query
+      queryClient.invalidateQueries({
+        queryKey: ["trips", debouncedSearchTerm, pagination.pageIndex + 1],
+      });
+      setDeleteDialogOpen(false);
+      setSelectedTrip(null);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to delete trip");
+      setDeleteDialogOpen(false);
+      setSelectedTrip(null);
+    },
+  });
+
+  const handleDeleteClick = (trip) => {
+    setSelectedTrip(trip);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedTrip) {
+      deleteMutation.mutate({
+        trip_push_date: selectedTrip.trip_push_date,
+        trip_sl_no: selectedTrip.trip_sl_no,
+      });
+    }
   };
 
   // Restore page from cookies when component mounts
@@ -390,7 +453,69 @@ const TripList = () => {
       },
       size: 120,
     },
-    
+    // {
+    //   accessorKey: "trip_push_date",
+    //   id: "Push Date",
+    //   header: "Push Date",
+    //   cell: ({ row }) => <div className="text-xs">{row.getValue("Push Date")}</div>,
+    //   size: 100,
+    // },
+    // {
+    //   accessorKey: "trip_sl_no",
+    //   id: "SL No",
+    //   header: "SL No",
+    //   cell: ({ row }) => <div className="text-xs">{row.getValue("SL No")}</div>,
+    //   size: 60,
+    // },
+    {
+      id: "actions",
+      header: "Action",
+      cell: ({ row }) => {
+        const trip = row.original;
+
+        return (
+          <div className="flex flex-row gap-1">
+            {/* <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleViewTrip(trip.id)}
+                    className="h-8 w-8"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>View Trip</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider> */}
+
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDeleteClick(trip)}
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Delete Trip</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        );
+      },
+      size: 100,
+    },
   ];
 
   const table = useReactTable({
@@ -533,6 +658,44 @@ const TripList = () => {
 
   return (
     <div className="max-w-full p-2">
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the trip
+              {selectedTrip && (
+                <div className="mt-2 p-3 bg-muted rounded-md">
+                  <p><span className="font-medium">Push Date:</span> {selectedTrip.trip_push_date}</p>
+                  <p><span className="font-medium">SL No:</span> {selectedTrip.trip_sl_no}</p>
+                  {selectedTrip.trip_driver_first_name && (
+                    <p><span className="font-medium">Driver:</span> {selectedTrip.trip_driver_first_name} {selectedTrip.trip_driver_surname}</p>
+                  )}
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <span className="mr-2 h-4 w-4 animate-spin">⌛</span>
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between py-1">
         <div className="relative w-64">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />

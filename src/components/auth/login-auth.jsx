@@ -20,7 +20,7 @@ import { motion } from "framer-motion";
 import Cookies from "js-cookie";
 import { Eye, EyeOff, LogIn } from "lucide-react";
 import BASE_URL from "@/config/base-url";
-import logoLogin from "@/assets/receipt/fts_log.png";
+// import logoLogin from "@/assets/receipt/fts_log.png";
 import { toast } from "sonner";
 
 const sliderImages = [
@@ -247,13 +247,13 @@ const handleSubmit = async (event) => {
       >
              <Card className="border-none shadow-none bg-transparent">
               <CardHeader className="pb-4 md:pb-6 flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left">
-                <div className="flex-shrink-0">
+                {/* <div className="flex-shrink-0">
                   <img 
                     src={logoLogin} 
                     className="w-auto h-16 md:h-20" 
                     alt="FTS Champ Logo"
                   />
-                </div>
+                </div> */}
                 <div className="space-y-1 md:space-y-2">
                   <CardTitle className="text-lg md:text-xl font-bold bg-gradient-to-r from-[var(--team-color)] to-[var(--color-dark)] bg-clip-text text-transparent">
                     Welcome Back

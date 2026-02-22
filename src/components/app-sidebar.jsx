@@ -62,18 +62,37 @@ const NAVIGATION_CONFIG = {
         icon: Frame,
       isActive: false,
   },
+   DRIVER_PERFORMANCE: {
+      title: "Driver Performance",
+      url: "/list-driver-performance",
+        icon: Frame,
+      isActive: false,
+  },
      PAYMENT: {
       title: "Payment",
       url: "/payment",
         icon: Frame,
       isActive: false,
   },
-   REPORT: {
+  
+    REPORT: {
       title: "Report",
-      url: "/report",
-        icon: Frame,
+      url: "#",
       isActive: false,
-  },
+      icon: Package,
+      items: [
+        {
+          title: "Report",
+          url: "/report",
+        },
+        {
+          title: "Driver Performance",
+          url: "/performance-driver-report",
+        },
+       
+       
+      ],
+    },
   },
 
   MODULES: {
@@ -309,7 +328,7 @@ const NAVIGATION_CONFIG = {
 
 const USER_ROLE_PERMISSIONS = {
   1: {
-    navMain: ["DASHBOARD", "TRIP","DRIVER","VEHICLE","DRIVERACTIVITY","DRIVER_AUTO_POSITION","PAYMENT", "REPORT"],
+    navMain: ["DASHBOARD", "TRIP","DRIVER","VEHICLE","DRIVERACTIVITY","DRIVER_AUTO_POSITION","DRIVER_PERFORMANCE","PAYMENT", "REPORT"],
     navMainReport: [ "SETTINGS"],
   },
 

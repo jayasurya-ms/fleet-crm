@@ -15,9 +15,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import BASE_URL from "@/config/base-url";
 import useNumericInput from "@/hooks/use-numeric-input";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   flexRender,
   getCoreRowModel,
@@ -28,9 +38,9 @@ import {
 } from "@tanstack/react-table";
 import axios from "axios";
 import Cookies from "js-cookie";
-import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Search, SquarePlus } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import CreateDriverActivity from "./create-driver-activity";
 
 const DriverActivityList = () => {
@@ -39,6 +49,8 @@ const DriverActivityList = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [previousSearchTerm, setPreviousSearchTerm] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState(null);
 
   const [pagination, setPagination] = useState({
     pageIndex: 0,
@@ -50,6 +62,56 @@ const DriverActivityList = () => {
     Cookies.set("driverActivityReturnPage", (pagination.pageIndex + 1).toString(), { 
       expires: 1 
     });
+  };
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async ({ driver_push_date, driver_sl_no }) => {
+      const token = Cookies.get("token");
+      const formData = new FormData();
+      formData.append("driver_push_date", driver_push_date);
+      formData.append("driver_sl_no", driver_sl_no);
+
+      const response = await axios.post(
+        `${BASE_URL}/api/driver-activity-all-delete`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || "Driver activity deleted successfully");
+      // Invalidate and refetch activities query
+      queryClient.invalidateQueries({
+        queryKey: ["driver-activities", debouncedSearchTerm, pagination.pageIndex + 1],
+      });
+      setDeleteDialogOpen(false);
+      setSelectedActivity(null);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to delete driver activity");
+      setDeleteDialogOpen(false);
+      setSelectedActivity(null);
+    },
+  });
+
+  const handleDeleteClick = (activity) => {
+    setSelectedActivity(activity);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedActivity) {
+      deleteMutation.mutate({
+        driver_push_date: selectedActivity.driver_push_date,
+        driver_sl_no: selectedActivity.driver_sl_no,
+      });
+    }
   };
 
   useEffect(() => {
@@ -284,6 +346,37 @@ const DriverActivityList = () => {
       cell: ({ row }) => <div className="text-xs">{row.getValue("Time on Trip")}</div>,
       size: 100,
     },
+    {
+      id: "actions",
+      header: "Action",
+      cell: ({ row }) => {
+        const activity = row.original;
+
+        return (
+          <div className="flex flex-row">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDeleteClick(activity)}
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Delete Activity</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        );
+      },
+      size: 80,
+    },
   ];
 
   const table = useReactTable({
@@ -426,6 +519,43 @@ const DriverActivityList = () => {
 
   return (
     <div className="max-w-full p-2">
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete this driver activity.
+              {selectedActivity && (
+                <div className="mt-2 p-3 bg-muted rounded-md">
+                  <p><span className="font-medium">Driver:</span> {selectedActivity.driver_name} {selectedActivity.driver_surname}</p>
+                  <p><span className="font-medium">Trips Completed:</span> {selectedActivity.trip_completed}</p>
+                  <p><span className="font-medium">Push Date:</span> {selectedActivity.driver_push_date}</p>
+                  <p><span className="font-medium">SL No:</span> {selectedActivity.driver_sl_no}</p>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <span className="mr-2 h-4 w-4 animate-spin">⌛</span>
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between py-1">
         <div className="relative w-64">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />

@@ -15,9 +15,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import BASE_URL from "@/config/base-url";
 import useNumericInput from "@/hooks/use-numeric-input";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   flexRender,
   getCoreRowModel,
@@ -28,9 +38,10 @@ import {
 } from "@tanstack/react-table";
 import axios from "axios";
 import Cookies from "js-cookie";
-import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Edit, Search } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Edit, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import CreateDriverAutoPosition from "./create-driver-auto-position";
 
 const DriverAutoPositionList = () => {
@@ -40,6 +51,8 @@ const DriverAutoPositionList = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [previousSearchTerm, setPreviousSearchTerm] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedPosition, setSelectedPosition] = useState(null);
 
   const [pagination, setPagination] = useState({
     pageIndex: 0,
@@ -56,6 +69,56 @@ const DriverAutoPositionList = () => {
   const handleEditDriverAutoPosition = (id) => {
     storeCurrentPage();
     navigate(`/driver-auto-position/edit/${id}`);
+  };
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async ({ driver_push_date, driver_sl_no }) => {
+      const token = Cookies.get("token");
+      const formData = new FormData();
+      formData.append("driver_push_date", driver_push_date);
+      formData.append("driver_sl_no", driver_sl_no);
+
+      const response = await axios.post(
+        `${BASE_URL}/api/driver-auto-position-delete`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || "Driver auto position deleted successfully");
+      // Invalidate and refetch positions query
+      queryClient.invalidateQueries({
+        queryKey: ["driver-auto-positions", debouncedSearchTerm, pagination.pageIndex + 1],
+      });
+      setDeleteDialogOpen(false);
+      setSelectedPosition(null);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to delete driver auto position");
+      setDeleteDialogOpen(false);
+      setSelectedPosition(null);
+    },
+  });
+
+  const handleDeleteClick = (position) => {
+    setSelectedPosition(position);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedPosition) {
+      deleteMutation.mutate({
+        driver_push_date: selectedPosition.driver_push_date,
+        driver_sl_no: selectedPosition.driver_sl_no,
+      });
+    }
   };
 
   useEffect(() => {
@@ -365,19 +428,20 @@ const DriverAutoPositionList = () => {
       id: "actions",
       header: "Action",
       cell: ({ row }) => {
-        const id = row.original.id;
+        const position = row.original;
 
         return (
-          <div className="flex flex-row">
+          <div className="flex flex-row gap-1">
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleEditDriverAutoPosition(id)}
+                    onClick={() => handleEditDriverAutoPosition(position.id)}
+                    className="h-8 w-8"
                   >
-                    <Edit />
+                    <Edit className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -385,10 +449,29 @@ const DriverAutoPositionList = () => {
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDeleteClick(position)}
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Delete Auto Position</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         );
       },
-      size: 80,
+      size: 100,
     },
   ];
 
@@ -532,6 +615,44 @@ const DriverAutoPositionList = () => {
 
   return (
     <div className="max-w-full p-2">
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete this driver auto position.
+              {selectedPosition && (
+                <div className="mt-2 p-3 bg-muted rounded-md">
+                  <p><span className="font-medium">Driver:</span> {selectedPosition.driver_name}</p>
+                  <p><span className="font-medium">Timestamp:</span> {selectedPosition.repositioning_timestamp}</p>
+                  <p><span className="font-medium">Outcome:</span> {selectedPosition.repositioning_outcome}</p>
+                  <p><span className="font-medium">Push Date:</span> {selectedPosition.driver_push_date}</p>
+                  <p><span className="font-medium">SL No:</span> {selectedPosition.driver_sl_no}</p>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <span className="mr-2 h-4 w-4 animate-spin">⌛</span>
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between py-1">
         <div className="relative w-64">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />

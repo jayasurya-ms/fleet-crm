@@ -14,11 +14,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import BASE_URL from "@/config/base-url";
 import useNumericInput from "@/hooks/use-numeric-input";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   flexRender,
   getCoreRowModel,
@@ -29,20 +38,21 @@ import {
 } from "@tanstack/react-table";
 import axios from "axios";
 import Cookies from "js-cookie";
-import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Edit, Eye, ReceiptText, Search, SquarePlus } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import CreateDriver from "../driver/create-driver";
+import CreateDriverPerformance from "./create-driver-performance";
 
-import { navigateToCreateReceipt } from "@/api";
-import { Link, useNavigate } from "react-router-dom";
 
-const DonorList = () => {
-  const userType = Cookies.get('user_type_id');
+const DriverPerformanceList = () => {
   const queryClient = useQueryClient();
-  const keyDown = useNumericInput()
-  const navigate = useNavigate()
+  const keyDown = useNumericInput();
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [previousSearchTerm, setPreviousSearchTerm] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedPerformance, setSelectedPerformance] = useState(null);
 
   const [pagination, setPagination] = useState({
     pageIndex: 0,
@@ -50,51 +60,75 @@ const DonorList = () => {
   });
 
   const [pageInput, setPageInput] = useState("");
+  
   const storeCurrentPage = () => {
-    Cookies.set("donorReturnPage", (pagination.pageIndex + 1).toString(), { 
+    Cookies.set("driverPerformanceReturnPage", (pagination.pageIndex + 1).toString(), { 
       expires: 1 
     });
   };
 
-  // Navigation handlers that store current page
-  const handleEditDonor = (id, donorType) => {
-    storeCurrentPage();
-    if (donorType === "Individual") {
-      navigate(`/donor/donor-edit-indivisual/${id}`);
-    } else {
-      navigate(`/donor/donor-edit-company/${id}`);
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async ({ push_date, sl_no }) => {
+      const token = Cookies.get("token");
+      const formData = new FormData();
+      formData.append("push_date", push_date);
+      formData.append("sl_no", sl_no);
+
+      const response = await axios.post(
+        `${BASE_URL}/api/driver-performance-delete`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || "Driver performance deleted successfully");
+      queryClient.invalidateQueries({
+        queryKey: ["driver-performance", debouncedSearchTerm, pagination.pageIndex + 1],
+      });
+      setDeleteDialogOpen(false);
+      setSelectedPerformance(null);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to delete driver performance");
+      setDeleteDialogOpen(false);
+      setSelectedPerformance(null);
+    },
+  });
+
+  const handleDeleteClick = (performance) => {
+    setSelectedPerformance(performance);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedPerformance) {
+      deleteMutation.mutate({
+        push_date: selectedPerformance.push_date,
+        sl_no: selectedPerformance.sl_no,
+      });
     }
   };
 
-  const handleViewDonor = (id) => {
-    storeCurrentPage();
-    navigate(`/donor/donor-view/${id}`);
-  };
-
-  const handleCreateReceipt = (id) => {
-    storeCurrentPage();
-    navigateToCreateReceipt(navigate, id);
-  };
-
-  // Restore page from cookies when component mounts
   useEffect(() => {
-    const savedPage = Cookies.get("donorReturnPage");
+    const savedPage = Cookies.get("driverPerformanceReturnPage");
     if (savedPage) {
-      // Remove the cookie first to prevent infinite loops
-      Cookies.remove("donorReturnPage");
+      Cookies.remove("driverPerformanceReturnPage");
       
-      // Set the pagination after a small delay to ensure proper rendering
       setTimeout(() => {
         const pageIndex = parseInt(savedPage) - 1;
         if (pageIndex >= 0) {
           setPagination(prev => ({ ...prev, pageIndex }));
-          
-          // Also update the page input field
           setPageInput(savedPage);
 
-          // Invalidate queries to refetch data for the correct page
           queryClient.invalidateQueries({
-            queryKey: ["donors"],
+            queryKey: ["driver-performance"],
             exact: false,
           });
         }
@@ -102,10 +136,8 @@ const DonorList = () => {
     }
   }, [queryClient]);
 
-  // Updated search effect - only reset pagination for genuine search changes
   useEffect(() => {
     const timerId = setTimeout(() => {
-      // Check if this is a genuine new search (not just initialization)
       const isNewSearch = searchTerm !== previousSearchTerm && previousSearchTerm !== "";
       
       if (isNewSearch) {
@@ -122,13 +154,13 @@ const DonorList = () => {
   }, [searchTerm, previousSearchTerm]);
 
   const {
-    data: donorsData,
+    data: performancesData,
     isLoading,
     isError,
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ["donors", debouncedSearchTerm, pagination.pageIndex + 1],
+    queryKey: ["driver-performance", debouncedSearchTerm, pagination.pageIndex + 1],
     queryFn: async () => {
       const token = Cookies.get("token");
       const params = new URLSearchParams({
@@ -140,7 +172,7 @@ const DonorList = () => {
       }
 
       const response = await axios.get(
-        `${BASE_URL}/api/donor?${params}`,
+        `${BASE_URL}/api/driver-performance?${params}`,
         {
           headers: { 
             Authorization: `Bearer ${token}`,
@@ -151,17 +183,17 @@ const DonorList = () => {
       return response.data.data;
     },
     keepPreviousData: true,
-    staleTime: 5 * 60 * 1000, 
+    staleTime: 5 * 60 * 1000,
   });
 
   useEffect(() => {
     const currentPage = pagination.pageIndex + 1;
-    const totalPages = donorsData?.last_page || 1;
+    const totalPages = performancesData?.last_page || 1;
     
     if (currentPage < totalPages) {
       const nextPage = currentPage + 1;
       queryClient.prefetchQuery({
-        queryKey: ["donors", debouncedSearchTerm, nextPage],
+        queryKey: ["driver-performance", debouncedSearchTerm, nextPage],
         queryFn: async () => {
           const token = Cookies.get("token");
           const params = new URLSearchParams({
@@ -173,7 +205,7 @@ const DonorList = () => {
           }
 
           const response = await axios.get(
-            `${BASE_URL}/api/donor?${params}`,
+            `${BASE_URL}/api/driver-performance?${params}`,
             {
               headers: { 
                 Authorization: `Bearer ${token}`,
@@ -183,16 +215,16 @@ const DonorList = () => {
           );
           return response.data.data;
         },
-        staleTime: 5 * 60 * 1000, 
+        staleTime: 5 * 60 * 1000,
       });
     }
 
     if (currentPage > 1) {
       const prevPage = currentPage - 1;
     
-      if (!queryClient.getQueryData(["donors", debouncedSearchTerm, prevPage])) {
+      if (!queryClient.getQueryData(["driver-performance", debouncedSearchTerm, prevPage])) {
         queryClient.prefetchQuery({
-          queryKey: ["donors", debouncedSearchTerm, prevPage],
+          queryKey: ["driver-performance", debouncedSearchTerm, prevPage],
           queryFn: async () => {
             const token = Cookies.get("token");
             const params = new URLSearchParams({
@@ -204,7 +236,7 @@ const DonorList = () => {
             }
 
             const response = await axios.get(
-              `${BASE_URL}/api/donor?${params}`,
+              `${BASE_URL}/api/driver-performance?${params}`,
               {
                 headers: { 
                   Authorization: `Bearer ${token}`,
@@ -218,12 +250,13 @@ const DonorList = () => {
         });
       }
     }
-  }, [pagination.pageIndex, debouncedSearchTerm, queryClient, donorsData?.last_page]);
+  }, [pagination.pageIndex, debouncedSearchTerm, queryClient, performancesData?.last_page]);
 
   const [sorting, setSorting] = useState([]);
   const [columnFilters, setColumnFilters] = useState([]);
   const [columnVisibility, setColumnVisibility] = useState({
-    "Fts Id": false,
+    "Driver Email": false,
+    "Driver Mobile": false,
   });
   const [rowSelection, setRowSelection] = useState({});
 
@@ -238,8 +271,8 @@ const DonorList = () => {
       size: 60,
     },
     {
-      accessorKey: "indicomp_full_name",
-      id: "Full Name",
+      accessorKey: "driver_full_name",
+      id: "Driver Name",
       header: ({ column }) => (
         <Button
           variant="ghost"
@@ -247,125 +280,227 @@ const DonorList = () => {
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
           className="px-2 h-8 text-xs"
         >
-          Full Name
+          Driver Name
           <ArrowUpDown className="ml-1 h-3 w-3" />
         </Button>
       ),
-      cell: ({ row }) => <div className="text-[13px] font-medium">{row.getValue("Full Name")}</div>,
-      size: 120,
-    },
-    
-    {
-      accessorKey: "indicomp_fts_id",
-      id: "Fts Id", 
-      header: "Fts Id",
-      cell: ({ row }) => <div className="text-xs">{row.getValue("Fts Id")}</div>,
-      size: 120,
-    },
-    {
-      id: "Contact Info",
-      header: "Contact Info",
-      cell: ({ row }) => (
-        <div className="space-y-1">
-          <div className="text-xs">
-            <span className="font-medium">Phone:</span> {row.original.indicomp_mobile_phone}
-          </div>
-          <div className="text-xs text-blue-600 ">
-            {row.original.indicomp_email}
-          </div>
-        </div>
-      ),
+      cell: ({ row }) => <div className="text-[13px] font-medium">{row.getValue("Driver Name")}</div>,
       size: 150,
     },
     {
-      id: "Personal Details",
-      header: "Personal Details",
-      cell: ({ row }) => (
-        <div className="space-y-1">
-          <div className="text-xs">
-            <span className="font-medium"></span> {row.original.indicomp_type}
-          </div>
-          <div className="text-xs">
-            {row.original.indicomp_type === 'Individual' ? (
-              <span> <span className="text-xs text-gray-500">Spouse :</span>  <span  className="font-medium">{row.original.indicomp_spouse_name || '-'}</span></span> 
-            ):(
-              <span ><span className="text-xs text-gray-500"> Contact :</span> <span className="font-medium">{row.original.indicomp_com_contact_name || '-'}</span></span> 
-            )}
-          </div>
-        </div>
+      accessorKey: "driver_email",
+      id: "Driver Email",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Email
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
       ),
-      size: 140,
+      cell: ({ row }) => <div className="text-xs">{row.getValue("Driver Email")}</div>,
+      size: 200,
     },
+    {
+      accessorKey: "driver_mobile",
+      id: "Driver Mobile",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Mobile
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => <div className="text-xs">{row.getValue("Driver Mobile")}</div>,
+      size: 120,
+    },
+    {
+      accessorKey: "total_earings",
+      id: "Total Earnings",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Total Earnings (₹)
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const amount = parseFloat(row.getValue("Total Earnings"));
+        return <div className="text-xs font-medium">₹{amount.toFixed(2)}</div>;
+      },
+      size: 120,
+    },
+    {
+      accessorKey: "cash_collected",
+      id: "Cash Collected",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Cash Collected (₹)
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const amount = parseFloat(row.getValue("Cash Collected"));
+        return <div className="text-xs">₹{amount.toFixed(2)}</div>;
+      },
+      size: 120,
+    },
+    {
+      accessorKey: "trips_taken",
+      id: "Trips Taken",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Trips
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => <div className="text-xs font-medium">{row.getValue("Trips Taken")}</div>,
+      size: 80,
+    },
+    {
+      accessorKey: "confirmation_rate",
+      id: "Confirmation Rate",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Confirmation
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const rate = parseFloat(row.getValue("Confirmation Rate"));
+        return <div className="text-xs">{(rate * 100).toFixed(0)}%</div>;
+      },
+      size: 100,
+    },
+    {
+      accessorKey: "cancellation_rate",
+      id: "Cancellation Rate",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Cancellation
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const rate = parseFloat(row.getValue("Cancellation Rate"));
+        return <div className="text-xs">{(rate * 100).toFixed(0)}%</div>;
+      },
+      size: 100,
+    },
+    {
+      accessorKey: "performance_type",
+      id: "Performance Type",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Type
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => <div className="text-xs">{row.getValue("Performance Type")}</div>,
+      size: 120,
+    },
+    {
+      accessorKey: "performance_date",
+      id: "Performance Date",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="px-2 h-8 text-xs"
+        >
+          Perfo. Date
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => <div className="text-xs">{row.getValue("Performance Date")}</div>,
+      size: 100,
+    },
+    // {
+    //   accessorKey: "push_date",
+    //   id: "Push Date",
+    //   header: "Push Date",
+    //   cell: ({ row }) => <div className="text-xs">{row.getValue("Push Date")}</div>,
+    //   size: 100,
+    // },
+    // {
+    //   accessorKey: "sl_no",
+    //   id: "SL No",
+    //   header: "SL No",
+    //   cell: ({ row }) => <div className="text-xs">{row.getValue("SL No")}</div>,
+    //   size: 60,
+    // },
     {
       id: "actions",
       header: "Action",
       cell: ({ row }) => {
-        const id = row.original.id;
+        const performance = row.original;
 
         return (
           <div className="flex flex-row">
-            {userType !== '4' && (
-              <>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleCreateReceipt(id)}
-                      >
-                        <ReceiptText />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Receipt Creation</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleEditDonor(id, row.original.indicomp_type)}
-                      >
-                        <Edit />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Donor Edit</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </>
-            )}
-
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleViewDonor(id)}
+                    onClick={() => handleDeleteClick(performance)}
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    disabled={deleteMutation.isPending}
                   >
-                    <Eye />
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Donor Dashboard</p>
+                  <p>Delete Performance</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
         );
       },
+      size: 80,
     },
   ];
 
   const table = useReactTable({
-    data: donorsData?.data || [],
+    data: performancesData?.data || [],
     columns,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
@@ -376,7 +511,7 @@ const DonorList = () => {
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     manualPagination: true,
-    pageCount: donorsData?.last_page || -1,
+    pageCount: performancesData?.last_page || -1,
     onPaginationChange: setPagination,
     state: {
       sorting,
@@ -394,7 +529,7 @@ const DonorList = () => {
 
   const handlePageChange = (newPageIndex) => {
     const targetPage = newPageIndex + 1;
-    const cachedData = queryClient.getQueryData(["donors", debouncedSearchTerm, targetPage]);
+    const cachedData = queryClient.getQueryData(["driver-performance", debouncedSearchTerm, targetPage]);
     
     if (cachedData) {
       setPagination(prev => ({ ...prev, pageIndex: newPageIndex }));
@@ -487,11 +622,11 @@ const DonorList = () => {
   
   if (isError) {
     return (
-      <div className="w-full p-4  ">
-        <div className="flex items-center justify-center h-64 ">
-          <div className="text-center ">
+      <div className="w-full p-4">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
             <div className="text-destructive font-medium mb-2">
-              Error Fetching Donors List Data
+              Error Fetching Driver Performance Data
             </div>
             <Button onClick={() => refetch()} variant="outline" size="sm">
               Try Again
@@ -504,11 +639,49 @@ const DonorList = () => {
 
   return (
     <div className="max-w-full p-2">
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete this driver performance record.
+              {selectedPerformance && (
+                <div className="mt-2 p-3 bg-muted rounded-md">
+                  <p><span className="font-medium">Driver:</span> {selectedPerformance.driver_full_name}</p>
+                  <p><span className="font-medium">Type:</span> {selectedPerformance.performance_type}</p>
+                  <p><span className="font-medium">Date:</span> {selectedPerformance.performance_date}</p>
+                  <p><span className="font-medium">Push Date:</span> {selectedPerformance.push_date}</p>
+                  <p><span className="font-medium">SL No:</span> {selectedPerformance.sl_no}</p>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <>
+                  <span className="mr-2 h-4 w-4 animate-spin">⌛</span>
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between py-1">
         <div className="relative w-64">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
           <Input
-            placeholder="Search donors..."
+            placeholder="Search driver performance..."
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             onKeyDown={(e) => {
@@ -542,30 +715,10 @@ const DonorList = () => {
                 ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          {userType !== '4' && (
-            <>
-              <Link 
-                to='/donor/donors-indiviusal-create'
-                onClick={storeCurrentPage}
-              >
-                <Button variant="default">
-                  <SquarePlus className="h-3 w-3 mr-2" /> Individual
-                </Button>
-              </Link>
-              <Link 
-                to='/donor/donors-company-create'
-                onClick={storeCurrentPage}
-              >
-                <Button variant="default">
-                  <SquarePlus className="h-3 w-3 mr-2" /> Company
-                </Button>
-              </Link>
-            </>
-          )}
+      <CreateDriverPerformance refetch={refetch} />
         </div>
       </div>
 
-      {/* Table */}
       <div className="rounded-none border min-h-[31rem] grid grid-cols-1">
         <Table className="flex-1">
           <TableHeader>
@@ -574,7 +727,7 @@ const DonorList = () => {
                 {headerGroup.headers.map((header) => (
                   <TableHead 
                     key={header.id} 
-                    className="h-10 px-3 bg-[var(--team-color)] text-[var(--label-color)]  text-sm font-medium"
+                    className="h-10 px-3 bg-[var(--team-color)] text-[var(--label-color)] text-sm font-medium"
                     style={{ width: header.column.columnDef.size }}
                   >
                     {header.isPlaceholder
@@ -612,7 +765,7 @@ const DonorList = () => {
             ) : (
               <TableRow className="h-12"> 
                 <TableCell colSpan={columns.length} className="h-24 text-center text-sm">
-                  No donors found.
+                  No driver performance records found.
                 </TableCell>
               </TableRow>
             )}
@@ -620,11 +773,10 @@ const DonorList = () => {
         </Table>
       </div>
 
-      {/* Pagination */}
       <div className="flex items-center justify-between py-1">
         <div className="text-sm text-muted-foreground">
-          Showing {donorsData?.from || 0} to {donorsData?.to || 0} of{" "}
-          {donorsData?.total || 0} donors
+          Showing {performancesData?.from || 0} to {performancesData?.to || 0} of{" "}
+          {performancesData?.total || 0} records
         </div>
         
         <div className="flex items-center space-x-2">
@@ -673,4 +825,9 @@ const DonorList = () => {
   );
 };
 
-export default DonorList;
+export default DriverPerformanceList;
+
+
+
+
+ 
